@@ -1,0 +1,111 @@
+---
+# template used by the injector initcontainer
+# to produce the final secret file that will
+# be read from the application
+#
+# NOTE: mySpecialVar and envVar2 are azure secrets
+#       saved in the azure keyvault
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: injector-template
+  namespace: ns1
+data:
+  template.tpl: |
+    export MY_SPECIAL_VAR={{ .mySpecialVar }}
+    export ENV_VAR_2={{ .envVar2 }}
+---
+# just a demo service
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo
+  namespace: ns1
+  labels:
+    run: demo
+spec:
+  ports:
+    - port: 8080
+      protocol: TCP
+  selector:
+    run: demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+  namespace: ns1
+  labels:
+    # aadpodidbinding: it is what authorize the initcontainer
+    # to read from the azure keyvault
+    aadpodidbinding: pod-binding-with-vault-read-permission
+spec:
+  selector:
+    matchLabels:
+      run: demo
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        run: demo
+        # aadpodidbinding: it is what authorize the initcontainer
+        # to read from the azure keyvault
+        aadpodidbinding: pod-binding-with-vault-read-permission
+    spec:
+      volumes:
+        # - injector initcontainer will saved the secrets here
+        # - application container will read the secrets from here
+        - name: secrets
+          emptyDir: {}
+        # - injector will populate a file with the secret from azure keyvault
+        # using this template
+        - name: injector-template-volume
+          configMap:
+            name: injector-template
+      containers:
+        # just a demo app
+        # https://github.com/francescop/printenv_webapp
+        - name: demo
+          image: francescopalazzini/printenv_webapp:latest
+          ports:
+            - containerPort: 8080
+          # the app must load the secrets file
+          command: ["/bin/bash", "-ce", "source /opt/secrets/.env && ./demo"]
+          resources:
+            limits:
+              cpu: 100m
+              memory: 50Mi
+            requests:
+              cpu: 100m
+              memory: 50Mi
+          volumeMounts:
+            # App sources the secret file from the volume that the injector 
+            # initcontainer populates
+            - name: secrets
+              mountPath: /opt/secrets
+      initContainers:
+        - name: injector-init-container
+          image: francescopalazzini/azure-keyvault-injector-initcontainer:latest
+          imagePullPolicy: Always
+          env:
+            # url of the azure vault
+            - name: VAULT_URI
+              value: "https://contoso.vault.azure.net/"
+            # this is the template
+            - name: INPUT_TEMPLATE_FILE
+              value: "/tmp/templates/template.tpl"
+            # this will be read by the final application
+            - name: OUTPUT_FILE_PATH
+              value: "/opt/secrets/.env"
+          resources:
+            limits:
+              cpu: 100m
+              memory: 50Mi
+            requests:
+              cpu: 100m
+              memory: 50Mi
+          volumeMounts:
+            - name: secrets
+              mountPath: /opt/secrets
+            - name: injector-template-volume
+              mountPath: /tmp/templates/

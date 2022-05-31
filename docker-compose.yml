@@ -1,0 +1,8 @@
+---
+version: '3'
+
+services:
+  vault:
+    image: francescopalazzini/azure-keyvault-injector-initcontainer:latest
+    build:
+      context: .

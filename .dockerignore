@@ -1,0 +1,3 @@
+docker-compose.yml
+./k8s_templates/*
+README.md
